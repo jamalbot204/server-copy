@@ -2,14 +2,15 @@
 
 import React, { memo, useCallback } from 'react';
 import { useUIContext } from '../contexts/UIContext.tsx';
-import { useChatState, useChatActions } from '../contexts/ChatContext.tsx';
+import { useSessionState } from '../contexts/SessionContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
 import { useAudioContext } from '../contexts/AudioContext.tsx';
 import { TrashIcon, AudioResetIcon, XCircleIcon } from './Icons.tsx';
 
 const MultiSelectActionBar: React.FC = memo(() => {
   const ui = useUIContext();
-  const { visibleMessagesForCurrentChat } = useChatState();
-  const { handleDeleteMultipleMessages } = useChatActions();
+  const { visibleMessagesForCurrentChat } = useSessionState();
+  const { handleDeleteMultipleMessages } = useMessageContext();
   const audio = useAudioContext();
 
   const { selectedMessageIds, clearSelection, toggleSelectionMode, selectAllVisible } = ui;

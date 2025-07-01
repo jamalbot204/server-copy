@@ -1,12 +1,11 @@
 
 
-
-
 import React, { createContext, useContext, useRef, ReactNode, useEffect, useCallback, useMemo } from 'react';
 import { AudioPlayerState, ChatMessage } from '../types.ts'; // Added ChatMessage
 import { useAudioPlayer } from '../hooks/useAudioPlayer.ts';
 import { useAudioControls } from '../hooks/useAudioControls.ts';
-import { useChatState, useChatActions } from './ChatContext.tsx'; // Updated import
+import { useSessionState, useSessionActions } from './SessionContext.tsx';
+import { useMessageContext } from './MessageContext.tsx'; // Updated import
 import { useUIContext } from './UIContext.tsx';
 import { useAutoPlay } from '../hooks/useAutoPlay.ts'; // Import the new hook
 import { splitTextForTts } from '../services/utils.ts';
@@ -38,8 +37,9 @@ interface AudioContextType {
 const AudioContext = createContext<AudioContextType | null>(null);
 
 export const AudioProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { currentChatSession, logApiRequest } = useChatState();
-  const { updateChatSession } = useChatActions();
+  const { currentChatSession } = useSessionState();
+  const { logApiRequest, triggerAutoPlayForNewMessage } = useMessageContext();
+  const { updateChatSession } = useSessionActions();
   const ui = useUIContext();
   const { activeApiKey } = useApiKeyContext();
   const apiKey = activeApiKey?.value || '';
@@ -85,7 +85,6 @@ export const AudioProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     playFunction: audioControls.handlePlayTextForMessage,
   });
   
-  const { triggerAutoPlayForNewMessage } = useChatActions();
   useEffect(() => {
     if (triggerAutoPlayForNewMessage && (triggerAutoPlayForNewMessage as any)._placeholder) {
       (triggerAutoPlayForNewMessage as any)(autoPlay.triggerAutoPlayForNewMessage);

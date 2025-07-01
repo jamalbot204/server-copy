@@ -4,7 +4,9 @@ import React, { memo, useCallback } from 'react';
 import { AttachmentWithContext, ChatMessageRole } from '../types.ts';
 import { CloseIcon, DocumentIcon, PlayCircleIcon, ArrowUturnLeftIcon, UserIcon, SparklesIcon } from './Icons.tsx'; // Assuming Sparkles for AI
 import RefreshAttachmentButton from './RefreshAttachmentButton.tsx'; // Import the button
-import { useChatState, useChatActions, useChatInteractionStatus } from '../contexts/ChatContext.tsx';
+import { useSessionState } from '../contexts/SessionContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
+import { useInteractionStatus } from '../contexts/InteractionStatusContext.tsx';
 
 interface ChatAttachmentsModalProps {
   isOpen: boolean;
@@ -21,9 +23,9 @@ const ChatAttachmentsModal: React.FC<ChatAttachmentsModalProps> = memo(({
   onClose,
   onGoToMessage,
 }) => {
-  const { currentChatSession } = useChatState();
-  const { handleReUploadAttachment } = useChatActions();
-  const { isLoading } = useChatInteractionStatus();
+  const { currentChatSession } = useSessionState();
+  const { handleReUploadAttachment } = useMessageContext();
+  const { isLoading } = useInteractionStatus();
 
   const getFileIcon = useCallback((item: AttachmentWithContext) => {
     const { attachment } = item;

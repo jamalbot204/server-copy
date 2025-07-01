@@ -232,23 +232,6 @@ export function useChatInteractions({
     isLoadingFromGemini,
     geminiHandleCancelGeneration
   ]);
-
-
-  const handleLoadMoreDisplayMessages = useCallback(async (chatId: string, count: number) => {
-    if (!currentChatSession || currentChatSession.id !== chatId) return;
-    await setMessagesToDisplayConfig(prev => ({
-      ...prev,
-      [chatId]: Math.min((prev[chatId] || 0) + count, currentChatSession.messages.length)
-    }));
-  }, [currentChatSession, setMessagesToDisplayConfig]);
-
-  const handleLoadAllDisplayMessages = useCallback(async (chatId: string) => {
-    if (!currentChatSession || currentChatSession.id !== chatId) return;
-    await setMessagesToDisplayConfig(prev => ({
-      ...prev,
-      [chatId]: currentChatSession.messages.length
-    }));
-  }, [currentChatSession, setMessagesToDisplayConfig]);
   
   const handleClearApiLogs = useCallback(async (sessionId: string) => {
     if (!currentChatSession || currentChatSession.id !== sessionId) return;
@@ -389,8 +372,6 @@ export function useChatInteractions({
     handleDeleteSingleMessageOnly,
     handleOpenEditMessagePanel,
     handleEditPanelSubmitWrapper, 
-    handleLoadMoreDisplayMessages,
-    handleLoadAllDisplayMessages,
     handleClearApiLogs,
     handleClearChatCacheForCurrentSession,
     requestDeleteConfirmationModal, 

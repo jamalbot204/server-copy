@@ -1,8 +1,11 @@
 
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useImperativeHandle, forwardRef, memo } from 'react';
-import { useChatState, useChatInteractionStatus, useChatActions } from '../contexts/ChatContext.tsx';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useImperativeHandle, forwardRef, memo, useMemo } from 'react';
+import { VariableSizeList } from 'react-window';
+import { useSessionState, useSessionActions } from '../contexts/SessionContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
+import { useInteractionStatus } from '../contexts/InteractionStatusContext.tsx';
 import { useUIContext } from '../contexts/UIContext.tsx';
-import { ChatMessageRole, AICharacter } from '../types.ts';
+import { ChatMessage, ChatMessageRole, AICharacter } from '../types.ts';
 import MessageItem from './MessageItem.tsx';
 import { LOAD_MORE_MESSAGES_COUNT } from '../constants.ts';
 import { Bars3Icon, FlowRightIcon, StopIcon, PaperClipIcon, XCircleIcon, DocumentIcon, PlayCircleIcon, UsersIcon, PlusIcon, ArrowsUpDownIcon, CheckIcon, InfoIcon, CloudArrowUpIcon, ServerIcon, SendIcon, ClipboardDocumentCheckIcon } from './Icons.tsx';
@@ -24,28 +27,33 @@ export interface ChatViewHandles {
 const ChatView = memo(forwardRef<ChatViewHandles, ChatViewProps>(({
     onEnterReadMode,
 }, ref) => {
-    const { currentChatSession, visibleMessagesForCurrentChat, currentChatId, logApiRequest } = useChatState();
-    const { isLoading, currentGenerationTimeDisplay, autoSendHook } = useChatInteractionStatus();
+    const { currentChatSession, visibleMessagesForCurrentChat, currentChatId } = useSessionState();
+    const { handleLoadMoreDisplayMessages, handleLoadAllDisplayMessages, handleManualSave } = useSessionActions();
+    const { isLoading, currentGenerationTimeDisplay, autoSendHook } = useInteractionStatus();
     const {
-        handleSendMessage, handleContinueFlow, handleCancelGeneration, handleManualSave,
-        handleLoadMoreDisplayMessages, handleLoadAllDisplayMessages,
-        handleReorderCharacters
-    } = useChatActions();
+        logApiRequest,
+        handleSendMessage, handleContinueFlow, handleCancelGeneration, handleReorderCharacters
+    } = useMessageContext();
 
     const ui = useUIContext();
     const { activeApiKey } = useApiKeyContext();
 
     const [inputMessage, setInputMessage] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-    const messageListRef = useRef<HTMLDivElement>(null);
     const textareaRef = useAutoResizeTextarea<HTMLTextAreaElement>(inputMessage);
     const [showLoadButtonsUI, setShowLoadButtonsUI] = useState(false);
 
-    const shouldPreserveScrollRef = useRef<boolean>(false);
-    const prevScrollHeightRef = useRef<number>(0);
-    const prevVisibleMessagesLengthRef = useRef<number>(0);
+    // --- Virtualization State and Refs ---
+    const listRef = useRef<VariableSizeList>(null);
+    const itemHeights = useRef(new Map<string, number>());
+    const messageListContainerRef = useRef<HTMLDivElement>(null);
+    const [listDimensions, setListDimensions] = useState({ width: 0, height: 0 });
+    const [scrollToMessageId, setScrollToMessageId] = useState<{ id: string, align: 'start' | 'center' | 'end' } | null>(null);
+    const userHasScrolledRef = useRef(false);
+    // --- End Virtualization State ---
+
     const prevChatIdRef = useRef<string | null | undefined>(null);
+    const prevVisibleMessagesLengthRef = useRef(0);
 
     const isCharacterMode = currentChatSession?.isCharacterModeActive || false;
     const [characters, setCharactersState] = useState<AICharacter[]>(currentChatSession?.aiCharacters || []);
@@ -72,47 +80,100 @@ const ChatView = memo(forwardRef<ChatViewHandles, ChatViewProps>(({
         getDisplayFileType,
     } = attachmentHandler;
 
-    const visibleMessages = visibleMessagesForCurrentChat || []; // Use pre-sliced messages from context
+    const visibleMessages = visibleMessagesForCurrentChat || [];
     const totalMessagesInSession = currentChatSession ? currentChatSession.messages.length : 0;
+    
+    const prevVisibleMessagesRef = useRef<ChatMessage[]>(visibleMessages);
+    useLayoutEffect(() => {
+        const prevMessages = prevVisibleMessagesRef.current;
+        const currentMessages = visibleMessages;
+        const prevMessageMap = new Map(prevMessages.map(m => [m.id, m]));
+        let needsReset = false;
+
+        // Check for updates that affect height (like streaming state change)
+        currentMessages.forEach((currentMsg, index) => {
+            const prevMsg = prevMessageMap.get(currentMsg.id);
+            if (prevMsg && prevMsg.isStreaming && !currentMsg.isStreaming) {
+                // A message has just finished streaming (completed or cancelled).
+                // Its height has likely changed.
+                itemHeights.current.delete(currentMsg.id);
+                if (listRef.current) {
+                    listRef.current.resetAfterIndex(index);
+                    needsReset = true; // Mark that a reset happened
+                }
+            }
+        });
+
+        // Check for deletions if no update-related reset happened
+        if (!needsReset && prevMessages.length > currentMessages.length) {
+            const currentMessageIds = new Set(currentMessages.map(m => m.id));
+            const deletedMessages = prevMessages.filter(prevMsg => !currentMessageIds.has(prevMsg.id));
+            
+            if (deletedMessages.length > 0) {
+                const firstDeletedIndex = prevMessages.findIndex(m => m.id === deletedMessages[0].id);
+                deletedMessages.forEach(msg => {
+                    itemHeights.current.delete(msg.id);
+                });
+                if (firstDeletedIndex !== -1 && listRef.current) {
+                    listRef.current.resetAfterIndex(firstDeletedIndex);
+                }
+            }
+        }
+
+        // Update the ref for the next render
+        prevVisibleMessagesRef.current = currentMessages;
+    }, [visibleMessages]);
+
+    // --- Virtualization Callbacks ---
+    const getItemSize = useCallback((index: number): number => {
+        const message = visibleMessages[index];
+        return itemHeights.current.get(message.id) || 120; // Default estimate
+    }, [visibleMessages]);
+
+    const handleHeightChange = useCallback((messageId: string, height: number) => {
+        const currentHeight = itemHeights.current.get(messageId);
+        // Only trigger reset if height changes significantly to avoid jitter
+        if (currentHeight === undefined || Math.abs(currentHeight - height) > 1) {
+            itemHeights.current.set(messageId, height);
+            const index = visibleMessages.findIndex(m => m.id === messageId);
+            if (index !== -1 && listRef.current) {
+                listRef.current.resetAfterIndex(index);
+            }
+        }
+    }, [visibleMessages]);
+    // --- End Virtualization Callbacks ---
 
     const handleLoadAll = useCallback(() => {
         if (!currentChatSession) return;
-        prevScrollHeightRef.current = messageListRef.current?.scrollHeight || 0;
-        shouldPreserveScrollRef.current = true;
-        handleLoadAllDisplayMessages(currentChatSession.id, totalMessagesInSession); // Pass totalMessagesInSession to load all
+        handleLoadAllDisplayMessages(currentChatSession.id);
         setShowLoadButtonsUI(false);
-    }, [currentChatSession, handleLoadAllDisplayMessages, totalMessagesInSession]);
+    }, [currentChatSession, handleLoadAllDisplayMessages]);
 
     useImperativeHandle(ref, () => ({
         scrollToMessage: (messageId: string) => {
-            const messageElement = messageListRef.current?.querySelector(`#message-item-${messageId}`);
-            if (messageElement) {
-                messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                messageElement.classList.add('ring-2', 'ring-blue-400', 'transition-all', 'duration-1000', 'ease-out');
+            const messageIndex = visibleMessages.findIndex(m => m.id === messageId);
+            if (messageIndex !== -1) {
+                listRef.current?.scrollToItem(messageIndex, 'center');
                 setTimeout(() => {
-                    messageElement.classList.remove('ring-2', 'ring-blue-400', 'transition-all', 'duration-1000', 'ease-out');
-                }, 2500);
+                    const messageElement = document.getElementById(`message-item-${messageId}`);
+                    if (messageElement) {
+                        messageElement.classList.add('ring-2', 'ring-blue-400', 'transition-all', 'duration-1000', 'ease-out');
+                        setTimeout(() => {
+                            messageElement.classList.remove('ring-2', 'ring-blue-400', 'transition-all', 'duration-1000', 'ease-out');
+                        }, 2500);
+                    }
+                }, 100);
             } else {
                 if (currentChatSession && visibleMessages.length < totalMessagesInSession) {
                     const isMessageInFullList = currentChatSession.messages.some(m => m.id === messageId);
                     if (isMessageInFullList) {
+                        setScrollToMessageId({ id: messageId, align: 'center' });
                         handleLoadAll();
-                        setTimeout(() => {
-                            const newAttemptMessageElement = messageListRef.current?.querySelector(`#message-item-${messageId}`);
-                            if (newAttemptMessageElement) {
-                                newAttemptMessageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                newAttemptMessageElement.classList.add('ring-2', 'ring-blue-400', 'transition-all', 'duration-1000', 'ease-out');
-                                setTimeout(() => {
-                                    newAttemptMessageElement.classList.remove('ring-2', 'ring-blue-400', 'transition-all', 'duration-1000', 'ease-out');
-                                }, 2500);
-                            }
-                        }, 500);
                     }
                 }
             }
         }
-    }), [currentChatSession, visibleMessages.length, totalMessagesInSession, handleLoadAll]);
-
+    }), [visibleMessages, totalMessagesInSession, currentChatSession, handleLoadAll]);
 
     useEffect(() => {
         setCharactersState(currentChatSession?.aiCharacters || []);
@@ -121,29 +182,79 @@ const ChatView = memo(forwardRef<ChatViewHandles, ChatViewProps>(({
         }
     }, [currentChatSession?.aiCharacters, currentChatSession?.isCharacterModeActive, isInfoInputModeActive]);
 
+    useLayoutEffect(() => {
+        const container = messageListContainerRef.current;
+        if (!container) return;
+        const resizeObserver = new ResizeObserver(entries => {
+            const entry = entries[0];
+            if (entry) {
+                setListDimensions({ width: entry.contentRect.width, height: entry.contentRect.height });
+            }
+        });
+        resizeObserver.observe(container);
+        return () => resizeObserver.disconnect();
+    }, []);
+    
+    // --- Virtualized Layout Effects ---
+    useEffect(() => {
+        // Effect to scroll to a message after its data has been loaded
+        if (scrollToMessageId) {
+            const index = visibleMessages.findIndex(m => m.id === scrollToMessageId.id);
+            if (index !== -1) {
+                listRef.current?.scrollToItem(index, scrollToMessageId.align);
+                setScrollToMessageId(null);
+            }
+        }
+    }, [scrollToMessageId, visibleMessages]);
 
     useLayoutEffect(() => {
-        const listElement = messageListRef.current;
+        const listElement = listRef.current;
         if (!listElement) return;
 
         const isNewChatOrSwitched = prevChatIdRef.current !== currentChatId;
-        const messagesLengthChanged = prevVisibleMessagesLengthRef.current !== visibleMessages.length;
+        const prevLength = prevVisibleMessagesLengthRef.current || 0;
+        const currentLength = visibleMessages.length;
+        const messagesAddedAtEnd = currentLength > prevLength;
         
         if (isNewChatOrSwitched) {
-            listElement.scrollTop = listElement.scrollHeight;
-        } else if (shouldPreserveScrollRef.current && messagesLengthChanged) {
-            listElement.scrollTop = listElement.scrollHeight - prevScrollHeightRef.current;
-            shouldPreserveScrollRef.current = false;
-        } else if (messagesLengthChanged && visibleMessages.length > prevVisibleMessagesLengthRef.current) {
-            const lastMessage = visibleMessages[visibleMessages.length - 1];
-            const isStreamingOrNewOwnMessage = lastMessage?.isStreaming || (lastMessage?.role === ChatMessageRole.USER && prevVisibleMessagesLengthRef.current < visibleMessages.length);
-            if (isStreamingOrNewOwnMessage && (listElement.scrollHeight - listElement.scrollTop - listElement.clientHeight < 200)) {
-                listElement.scrollTop = listElement.scrollHeight;
+            listRef.current?.scrollToItem(currentLength - 1, 'end');
+            userHasScrolledRef.current = false;
+        } else if (messagesAddedAtEnd && !userHasScrolledRef.current) {
+            const lastMessage = visibleMessages[currentLength - 1];
+            const isStreamingOrNewOwnMessage = lastMessage?.isStreaming || lastMessage?.role === ChatMessageRole.USER;
+            if (isStreamingOrNewOwnMessage) {
+                listRef.current?.scrollToItem(currentLength - 1, 'end');
             }
         }
-        prevVisibleMessagesLengthRef.current = visibleMessages.length;
+        prevVisibleMessagesLengthRef.current = currentLength;
         prevChatIdRef.current = currentChatId;
     }, [visibleMessages, currentChatId]);
+    // --- End Virtualized Layout Effects ---
+    
+    // Effect for handling window resize
+    useEffect(() => {
+        let debounceTimer: number;
+
+        const handleResize = () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = window.setTimeout(() => {
+                // Clear the entire height cache
+                itemHeights.current.clear();
+                // Force the list to re-measure all items
+                if (listRef.current) {
+                    listRef.current.resetAfterIndex(0);
+                }
+            }, 150); // 150ms debounce
+        };
+
+        window.addEventListener('resize', handleResize);
+
+        // Cleanup function
+        return () => {
+            clearTimeout(debounceTimer);
+            window.removeEventListener('resize', handleResize);
+        };
+    }, []); // Empty dependency array means this runs once on mount and cleans up on unmount.
 
 
     const handleSendMessageClick = useCallback(async (characterId?: string) => {
@@ -176,23 +287,20 @@ const ChatView = memo(forwardRef<ChatViewHandles, ChatViewProps>(({
             return;
         }
 
+        userHasScrolledRef.current = false; // User is sending, so they are at the bottom.
         setInputMessage('');
         resetSelectedFiles();
         if (isInfoInputModeActive && temporaryContextFlag) {
             setIsInfoInputModeActive(false);
         }
-
-        prevScrollHeightRef.current = messageListRef.current?.scrollHeight || 0;
-        shouldPreserveScrollRef.current = false;
         await handleSendMessage(currentInputMessageValue, attachmentsToSend, undefined, characterId, temporaryContextFlag);
     }, [inputMessage, getValidAttachmentsToSend, isLoading, currentChatSession, autoSendHook, isAnyFileStillProcessing, ui, isCharacterMode, isInfoInputModeActive, handleSendMessage, resetSelectedFiles]);
 
     const handleContinueFlowClick = useCallback(async () => {
         if (isLoading || !currentChatSession || currentChatSession.messages.length === 0 || isCharacterMode || autoSendHook.isAutoSendingActive) return;
+        userHasScrolledRef.current = false; // User is continuing, so they are at the bottom.
         setInputMessage('');
         resetSelectedFiles();
-        prevScrollHeightRef.current = messageListRef.current?.scrollHeight || 0;
-        shouldPreserveScrollRef.current = false;
         await handleContinueFlow();
     }, [isLoading, currentChatSession, isCharacterMode, autoSendHook.isAutoSendingActive, handleContinueFlow, resetSelectedFiles]);
 
@@ -209,24 +317,25 @@ const ChatView = memo(forwardRef<ChatViewHandles, ChatViewProps>(({
         setInputMessage(e.target.value);
     }, []);
 
-    const handleScroll = useCallback(() => {
-        if (messageListRef.current) {
-            const { scrollTop } = messageListRef.current;
-            if (scrollTop < 5 && currentChatSession && visibleMessages.length < totalMessagesInSession) {
-                setShowLoadButtonsUI(true);
-            } else {
-                setShowLoadButtonsUI(false);
-            }
+    const handleListScroll = useCallback(({ scrollDirection, scrollOffset }: { scrollDirection: 'forward' | 'backward', scrollOffset: number }) => {
+        if (scrollDirection === 'backward' && scrollOffset > 0) {
+            userHasScrolledRef.current = true;
         }
-    }, [currentChatSession, visibleMessages.length, totalMessagesInSession]);
+        if (scrollOffset < 5 && currentChatSession && visibleMessages.length < totalMessagesInSession) {
+            setShowLoadButtonsUI(true);
+        } else if (showLoadButtonsUI) {
+            setShowLoadButtonsUI(false);
+        }
+    }, [currentChatSession, visibleMessages.length, totalMessagesInSession, showLoadButtonsUI]);
+    
 
     const handleLoadMore = useCallback((count: number) => {
         if (!currentChatSession) return;
-        prevScrollHeightRef.current = messageListRef.current?.scrollHeight || 0;
-        shouldPreserveScrollRef.current = true;
+        const topMessageId = visibleMessages[0]?.id;
+        if(topMessageId) setScrollToMessageId({ id: topMessageId, align: 'start'});
         handleLoadMoreDisplayMessages(currentChatSession.id, count);
         setShowLoadButtonsUI(false);
-    }, [currentChatSession, handleLoadMoreDisplayMessages]);
+    }, [currentChatSession, handleLoadMoreDisplayMessages, visibleMessages]);
 
     const toggleInfoInputMode = useCallback(() => {
         setIsInfoInputModeActive(prev => {
@@ -271,11 +380,10 @@ const ChatView = memo(forwardRef<ChatViewHandles, ChatViewProps>(({
         const [removed] = currentChars.splice(draggedIndex, 1);
         currentChars.splice(targetIndex, 0, removed);
         
-        setCharactersState(currentChars); // Update local state immediately for responsiveness
-        await handleReorderCharacters(currentChars); // Update context and persist
+        setCharactersState(currentChars);
+        await handleReorderCharacters(currentChars);
         draggedCharRef.current = null;
     }, [isReorderingActive, currentChatSession, characters, handleReorderCharacters]);
-
 
     const handleDragEnd = useCallback((e: React.DragEvent<HTMLButtonElement>) => {
         if (!isReorderingActive) return;
@@ -307,6 +415,28 @@ const ChatView = memo(forwardRef<ChatViewHandles, ChatViewProps>(({
             ? "Enter one-time contextual info for the character..."
             : "Type message (optional), then select character...";
     }
+
+    const Row = useMemo(() => memo(({ index, style, data }: { index: number; style: React.CSSProperties; data: ChatMessage[] }) => {
+        const msg = data[index];
+        if (!msg) return <div style={style}></div>; // Should not happen but a good guard
+    
+        const fullMessageList = currentChatSession!.messages; 
+        const currentMessageIndexInFullList = fullMessageList.findIndex(m => m.id === msg.id);
+        const nextMessageInFullList = (currentMessageIndexInFullList !== -1 && currentMessageIndexInFullList < fullMessageList.length - 1) ? fullMessageList[currentMessageIndexInFullList + 1] : null;
+        const canRegenerateFollowingAI = msg.role === ChatMessageRole.USER && nextMessageInFullList !== null && (nextMessageInFullList.role === ChatMessageRole.MODEL || nextMessageInFullList.role === ChatMessageRole.ERROR) && !isCharacterMode;
+        
+        return (
+            <div style={style}>
+                 <MessageItem 
+                     message={msg} 
+                     canRegenerateFollowingAI={canRegenerateFollowingAI} 
+                     onEnterReadMode={onEnterReadMode}
+                     onHeightChange={handleHeightChange}
+                 />
+            </div>
+        );
+    }), [currentChatSession, isCharacterMode, onEnterReadMode, handleHeightChange]);
+    
 
     return (
         <div className="flex flex-col h-full bg-transparent overflow-hidden">
@@ -353,35 +483,39 @@ const ChatView = memo(forwardRef<ChatViewHandles, ChatViewProps>(({
                 )}
             </header>
 
-            <div ref={messageListRef} onScroll={handleScroll} className={`flex-1 min-h-0 p-4 sm:p-6 overflow-y-auto relative ${ui.isSelectionModeActive ? 'pb-20' : ''}`} role="log" aria-live="polite">
-                {currentChatSession && visibleMessages.length < totalMessagesInSession && (
-                    <div className="sticky top-2 left-1/2 transform -translate-x-1/2 z-10 flex flex-col items-center space-y-2 my-2 h-20 justify-center">
-                        <div className={`transition-opacity duration-300 ${showLoadButtonsUI ? 'opacity-100' : 'opacity-0'}`}>
-                            {amountToLoad > 0 && <button onClick={() => handleLoadMore(amountToLoad)} className="px-4 py-2 text-xs bg-[var(--aurora-accent-primary)] text-white rounded-full shadow-lg transition-all transform hover:scale-105 hover:shadow-[0_0_12px_2px_rgba(90,98,245,0.6)] mb-2">Show {amountToLoad} More</button>}
-                            <button onClick={handleLoadAll} className="px-4 py-2 text-xs bg-white/10 text-white rounded-full shadow-lg transition-all transform hover:scale-105 hover:shadow-[0_0_12px_2px_rgba(255,255,255,0.2)]">Show All History ({totalMessagesInSession - visibleMessages.length} more)</button>
-                        </div>
+            {currentChatSession && visibleMessages.length < totalMessagesInSession && (
+                <div className="flex-shrink-0 flex justify-center py-2 z-10">
+                    <div className={`transition-opacity duration-300 ${showLoadButtonsUI ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                        {amountToLoad > 0 && <button onClick={() => handleLoadMore(amountToLoad)} className="px-4 py-2 text-xs bg-[var(--aurora-accent-primary)] text-white rounded-full shadow-lg transition-all transform hover:scale-105 hover:shadow-[0_0_12px_2px_rgba(90,98,245,0.6)] mr-2">Show {amountToLoad} More</button>}
+                        <button onClick={handleLoadAll} className="px-4 py-2 text-xs bg-white/10 text-white rounded-full shadow-lg transition-all transform hover:scale-105 hover:shadow-[0_0_12px_2px_rgba(255,255,255,0.2)]">Show All History ({totalMessagesInSession - visibleMessages.length} more)</button>
                     </div>
-                )}
-                <div className={`flex flex-col space-y-0`}>
-                    {currentChatSession ? (
-                        visibleMessages.length > 0 ? (
-                            visibleMessages.map((msg) => {
-                                const fullMessageList = currentChatSession!.messages; 
-                                const currentMessageIndexInFullList = fullMessageList.findIndex(m => m.id === msg.id);
-                                const nextMessageInFullList = (currentMessageIndexInFullList !== -1 && currentMessageIndexInFullList < fullMessageList.length - 1) ? fullMessageList[currentMessageIndexInFullList + 1] : null;
-                                const canRegenerateFollowingAI = msg.role === ChatMessageRole.USER && nextMessageInFullList !== null && (nextMessageInFullList.role === ChatMessageRole.MODEL || nextMessageInFullList.role === ChatMessageRole.ERROR) && !isCharacterMode;
-                                return <MessageItem key={msg.id} message={msg} canRegenerateFollowingAI={canRegenerateFollowingAI} chatScrollContainerRef={messageListRef} onEnterReadMode={onEnterReadMode} />;
-                            })
-                        ) : (
-                            <div className="text-center text-gray-500 italic mt-10">
-                                {isCharacterMode && characters.length === 0 ? "Add some characters and start the scene!" : (isCharacterMode ? "Select a character to speak." : "Start the conversation!")}
-                            </div>
+                </div>
+            )}
+            
+            <div ref={messageListContainerRef} className={`flex-1 min-h-0 px-4 sm:px-6 relative ${ui.isSelectionModeActive ? 'pb-20' : ''}`} role="log" aria-live="polite">
+                {currentChatSession ? (
+                    visibleMessages.length > 0 ? (
+                        listDimensions.height > 0 && (
+                            <VariableSizeList
+                                ref={listRef}
+                                height={listDimensions.height}
+                                width={listDimensions.width}
+                                itemCount={visibleMessages.length}
+                                itemSize={getItemSize}
+                                itemData={visibleMessages}
+                                onScroll={handleListScroll}
+                            >
+                                {Row}
+                            </VariableSizeList>
                         )
                     ) : (
-                        <div className="text-center text-gray-500 italic mt-10">Select a chat from the history or start a new one.</div>
-                    )}
-                </div>
-                <div ref={messagesEndRef} />
+                        <div className="text-center text-gray-500 italic mt-10">
+                            {isCharacterMode && characters.length === 0 ? "Add some characters and start the scene!" : (isCharacterMode ? "Select a character to speak." : "Start the conversation!")}
+                        </div>
+                    )
+                ) : (
+                    <div className="text-center text-gray-500 italic mt-10">Select a chat from the history or start a new one.</div>
+                )}
             </div>
             
             <div className="flex-shrink-0 z-20 bg-transparent flex flex-col">
@@ -438,25 +572,13 @@ const ChatView = memo(forwardRef<ChatViewHandles, ChatViewProps>(({
                 )}
                 {(currentChatSession?.settings?.showAutoSendControls) && (
                     <AutoSendControls
-                        isAutoSendingActive={autoSendHook.isAutoSendingActive}
-                        autoSendText={autoSendHook.autoSendText}
-                        setAutoSendText={autoSendHook.setAutoSendText}
-                        autoSendRepetitionsInput={autoSendHook.autoSendRepetitionsInput}
-                        setAutoSendRepetitionsInput={autoSendHook.setAutoSendRepetitionsInput}
-                        autoSendRemaining={autoSendHook.autoSendRemaining}
                         onStartAutoSend={() => {
                             if (!isCharacterMode && autoSendHook.canStartAutoSend(autoSendHook.autoSendText, autoSendHook.autoSendRepetitionsInput) && !autoSendHook.isAutoSendingActive && !isLoading) {
                                 autoSendHook.startAutoSend(autoSendHook.autoSendText, parseInt(autoSendHook.autoSendRepetitionsInput, 10) || 1);
                             }
                         }}
-                        onStopAutoSend={autoSendHook.stopAutoSend}
-                        canStart={autoSendHook.canStartAutoSend(autoSendHook.autoSendText, autoSendHook.autoSendRepetitionsInput)}
-                        isChatViewLoading={isLoading}
                         currentChatSessionExists={!!currentChatSession}
                         isCharacterMode={isCharacterMode}
-                        isPreparingAutoSend={autoSendHook.isPreparingAutoSend}
-                        isWaitingForErrorRetry={autoSendHook.isWaitingForErrorRetry}
-                        errorRetryCountdown={autoSendHook.errorRetryCountdown}
                     />
                 )}
                 <div className="p-3 sm:p-4 border-t border-[var(--aurora-border)] bg-transparent">

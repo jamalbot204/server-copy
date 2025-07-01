@@ -1,7 +1,8 @@
 
 
 import React, { useState, useEffect, useCallback, memo } from 'react';
-import { useChatActions, useChatInteractionStatus } from '../contexts/ChatContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
+import { useInteractionStatus } from '../contexts/InteractionStatusContext.tsx';
 import { useUIContext } from '../contexts/UIContext.tsx';
 import { ChatMessageRole, Attachment } from '../types.ts';
 import { CloseIcon, SparklesIcon, UserIcon, SaveDiskIcon, XCircleIcon, SubmitPlayIcon, ContinueArrowIcon } from './Icons.tsx';
@@ -23,8 +24,8 @@ export interface EditMessagePanelDetails {
 }
 
 const EditMessagePanel: React.FC = memo(() => {
-  const { handleEditPanelSubmit, handleCancelGeneration } = useChatActions();
-  const { isLoading } = useChatInteractionStatus();
+  const { handleEditPanelSubmit, handleCancelGeneration } = useMessageContext();
+  const { isLoading } = useInteractionStatus();
   const { isEditPanelOpen, editingMessageDetail, closeEditPanel } = useUIContext();
 
   const [editedContent, setEditedContent] = useState('');

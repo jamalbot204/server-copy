@@ -1,6 +1,7 @@
 
+
 import React, { useState, useEffect, useMemo, memo, useCallback } from 'react';
-import { useChatState, useChatActions } from '../contexts/ChatContext.tsx';
+import { useSessionState, useSessionActions } from '../contexts/SessionContext.tsx';
 import { useUIContext } from '../contexts/UIContext.tsx';
 import { GeminiSettings, SafetySetting } from '../types.ts';
 import { DEFAULT_SETTINGS, MODEL_DEFINITIONS, DEFAULT_MODEL_ID, INITIAL_MESSAGES_COUNT, MODELS_SUPPORTING_THINKING_BUDGET_UI, MODELS_SENDING_THINKING_CONFIG_API } from '../constants.ts';
@@ -12,6 +13,7 @@ import ThinkingBudgetControl from './ThinkingBudgetControl.tsx';
 import ApiKeyManagerModal from './ApiKeyManagerModal.tsx';
 import * as dbService from '../services/dbService.ts';
 import { METADATA_KEYS } from '../services/dbService.ts';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
 
 const InstructionButton: React.FC<{
     label: string; value: string | undefined; onClick: () => void; placeholder: string;
@@ -27,8 +29,9 @@ const InstructionButton: React.FC<{
 
 // No more props needed!
 const SettingsPanel: React.FC = memo(() => {
-    const { currentChatSession } = useChatState();
-    const { updateChatSession, handleClearChatCacheForCurrentSession } = useChatActions();
+    const { currentChatSession } = useSessionState();
+    const { updateChatSession } = useSessionActions();
+    const { handleClearChatCacheForCurrentSession } = useMessageContext();
     const ui = useUIContext();
 
     const [localSettings, setLocalSettings] = useState<GeminiSettings>(currentChatSession?.settings || DEFAULT_SETTINGS);

@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useMemo, memo, useCallback } from 'react';
 import { ExportConfiguration } from '../types.ts';
-import { useChatState, useChatActions } from '../contexts/ChatContext.tsx';
+import { useSessionState, useSessionActions } from '../contexts/SessionContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
 import { useUIContext } from '../contexts/UIContext.tsx';
 import { DEFAULT_EXPORT_CONFIGURATION } from '../constants.ts';
 import { CloseIcon, CheckIcon, ArrowPathIcon, UsersIcon, DocumentDuplicateIcon, KeyIcon } from './Icons.tsx';
@@ -49,8 +50,9 @@ const renderCategoryHeader = (title: string, icon?: React.ReactNode) => (
 
 // No props are needed anymore!
 const ExportConfigurationModal: React.FC = memo(() => {
-  const { chatHistory, currentExportConfig } = useChatState();
-  const { setCurrentExportConfig, handleExportChats } = useChatActions();
+  const { chatHistory, currentExportConfig } = useSessionState();
+  const { setCurrentExportConfig } = useSessionActions();
+  const { handleExportChats } = useMessageContext();
   const ui = useUIContext();
 
   const [localConfig, setLocalConfig] = useState<ExportConfiguration>(currentExportConfig);

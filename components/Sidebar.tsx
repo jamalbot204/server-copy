@@ -1,19 +1,21 @@
 
 
 import React, { useRef, useEffect, memo, useCallback } from 'react';
-import { useChatState, useChatActions } from '../contexts/ChatContext.tsx';
+import { useSessionState, useSessionActions } from '../contexts/SessionContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
 import { useUIContext } from '../contexts/UIContext.tsx';
 import { APP_TITLE } from '../constants.ts';
 import { PlusIcon, TrashIcon, CogIcon, ExportIcon, ImportIcon, UsersIcon, IconDirectionLtr, IconDirectionRtl, PencilIcon, CheckIcon, XCircleIcon, DocumentDuplicateIcon } from './Icons.tsx';
 
 const Sidebar: React.FC = memo(() => {
-  const { chatHistory, currentChatId, currentChatSession, editingTitleInfo } = useChatState();
+  const { chatHistory, currentChatId, currentChatSession, editingTitleInfo } = useSessionState();
   const {
-      handleNewChat, handleToggleCharacterMode, handleImportAll,
+      handleNewChat,
       handleSelectChat, handleStartEditChatTitle, handleSaveChatTitle,
       handleCancelEditChatTitle, handleEditTitleInputChange, handleDuplicateChat,
       handleDeleteChat,
-  } = useChatActions();
+  } = useSessionActions();
+  const { handleToggleCharacterMode, handleImportAll } = useMessageContext();
   const ui = useUIContext();
   
   const editInputRef = useRef<HTMLInputElement>(null);

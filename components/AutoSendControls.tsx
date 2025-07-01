@@ -2,42 +2,36 @@
 
 import React, { memo } from 'react';
 import { PlayIcon, StopIcon } from './Icons.tsx';
+import { useInteractionStatus } from '../contexts/InteractionStatusContext.tsx';
 
 interface AutoSendControlsProps {
-  isAutoSendingActive: boolean;
-  autoSendText: string;
-  setAutoSendText: (text: string) => void;
-  autoSendRepetitionsInput: string;
-  setAutoSendRepetitionsInput: (reps: string) => void;
-  autoSendRemaining: number;
   onStartAutoSend: () => void; 
-  onStopAutoSend: () => void;
-  canStart: boolean; 
-  isChatViewLoading: boolean;
   currentChatSessionExists: boolean;
   isCharacterMode: boolean;
-  isPreparingAutoSend: boolean;
-  isWaitingForErrorRetry: boolean; // New prop
-  errorRetryCountdown: number;    // New prop
 }
 
 const AutoSendControls: React.FC<AutoSendControlsProps> = memo(({
-  isAutoSendingActive,
-  autoSendText,
-  setAutoSendText,
-  autoSendRepetitionsInput,
-  setAutoSendRepetitionsInput,
-  autoSendRemaining,
   onStartAutoSend,
-  onStopAutoSend,
-  canStart,
-  isChatViewLoading,
   currentChatSessionExists,
   isCharacterMode,
-  isPreparingAutoSend,
-  isWaitingForErrorRetry, // Destructure new prop
-  errorRetryCountdown,    // Destructure new prop
 }) => {
+  const { isLoading: isChatViewLoading, autoSendHook } = useInteractionStatus();
+  const {
+    isAutoSendingActive,
+    autoSendText,
+    setAutoSendText,
+    autoSendRepetitionsInput,
+    setAutoSendRepetitionsInput,
+    autoSendRemaining,
+    stopAutoSend: onStopAutoSend,
+    canStartAutoSend,
+    isPreparingAutoSend,
+    isWaitingForErrorRetry,
+    errorRetryCountdown,
+  } = autoSendHook;
+
+  const canStart = canStartAutoSend(autoSendText, autoSendRepetitionsInput);
+
   const commonInputClass = "p-2 aurora-input text-sm disabled:opacity-50";
   const commonButtonClass = "p-2 text-sm font-medium rounded-md transition-shadow focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black disabled:opacity-50 disabled:cursor-not-allowed";
 

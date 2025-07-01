@@ -1,7 +1,8 @@
 
 
 import React, { useState, memo } from 'react';
-import { useChatState, useChatActions } from '../contexts/ChatContext.tsx';
+import { useSessionState } from '../contexts/SessionContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
 import { useUIContext } from '../contexts/UIContext.tsx';
 import { ApiRequestLog } from '../types.ts';
 import { CloseIcon, TrashIcon, BugAntIcon, ChevronDownIcon, ChevronRightIcon } from './Icons.tsx';
@@ -63,8 +64,8 @@ const LogEntryComponent: React.FC<LogEntryProps> = ({ log }) => {
 const LogEntry = memo(LogEntryComponent);
 
 const DebugTerminalPanel: React.FC = memo(() => {
-  const { currentChatSession } = useChatState();
-  const { handleClearApiLogs } = useChatActions();
+  const { currentChatSession } = useSessionState();
+  const { handleClearApiLogs } = useMessageContext();
   const { isDebugTerminalOpen, closeDebugTerminal } = useUIContext();
 
   if (!isDebugTerminalOpen || !currentChatSession) return null;

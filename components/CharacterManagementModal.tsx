@@ -1,15 +1,16 @@
 
 
 import React, { useState, useEffect, memo, useCallback } from 'react';
-import { useChatState, useChatActions } from '../contexts/ChatContext.tsx';
+import { useSessionState } from '../contexts/SessionContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
 import { useUIContext } from '../contexts/UIContext.tsx';
 import { AICharacter } from '../types.ts';
 import { CloseIcon, PencilIcon, TrashIcon, InfoIcon } from './Icons.tsx';
 
 // No props are needed anymore!
 const CharacterManagementModal: React.FC = memo(() => {
-  const { currentChatSession } = useChatState();
-  const { handleAddCharacter, handleEditCharacter, handleDeleteCharacter } = useChatActions();
+  const { currentChatSession } = useSessionState();
+  const { handleAddCharacter, handleEditCharacter, handleDeleteCharacter } = useMessageContext();
   const { isCharacterManagementModalOpen, closeCharacterManagementModal, openCharacterContextualInfoModal } = useUIContext();
 
   const [editingCharacter, setEditingCharacter] = useState<AICharacter | null>(null);

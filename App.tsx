@@ -1,6 +1,9 @@
+
+
 import React, { memo } from 'react';
 import { UIProvider } from './contexts/UIContext.tsx';
-import { ChatProvider } from './contexts/ChatContext.tsx';
+import { SessionProvider } from './contexts/SessionContext.tsx';
+import { MessageProvider } from './contexts/MessageContext.tsx';
 import { AudioProvider } from './contexts/AudioContext.tsx';
 import { ApiKeyProvider } from './contexts/ApiKeyContext.tsx';
 import AppContent from './components/AppContent.tsx'; 
@@ -9,11 +12,13 @@ const App: React.FC = memo(() => {
   return (
     <ApiKeyProvider>
       <UIProvider>
-        <ChatProvider>
-          <AudioProvider>
-            <AppContent />
-          </AudioProvider>
-        </ChatProvider>
+        <SessionProvider>
+          <MessageProvider>
+            <AudioProvider>
+              <AppContent />
+            </AudioProvider>
+          </MessageProvider>
+        </SessionProvider>
       </UIProvider>
     </ApiKeyProvider>
   );

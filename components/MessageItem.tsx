@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, memo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, memo, useCallback, useLayoutEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { LightAsync as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -8,7 +8,9 @@ import Mark from 'mark.js/dist/mark.es6.js';
 import { ChatMessage, ChatMessageRole, GroundingChunk, Attachment } from '../types.ts';
 import ResetAudioCacheButton from './ResetAudioCacheButton.tsx';
 import RefreshAttachmentButton from './RefreshAttachmentButton.tsx';
-import { useChatState, useChatActions, useChatInteractionStatus } from '../contexts/ChatContext.tsx';
+import { useSessionState } from '../contexts/SessionContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
+import { useInteractionStatus } from '../contexts/InteractionStatusContext.tsx';
 import { useUIContext } from '../contexts/UIContext.tsx';
 import { useAudioContext } from '../contexts/AudioContext.tsx';
 import { MAX_WORDS_PER_TTS_SEGMENT, MESSAGE_CONTENT_SNIPPET_THRESHOLD } from '../constants.ts';
@@ -24,9 +26,9 @@ import { splitTextForTts, sanitizeFilename } from '../services/utils.ts';
 interface MessageItemProps {
   message: ChatMessage;
   canRegenerateFollowingAI?: boolean;
-  chatScrollContainerRef?: React.RefObject<HTMLDivElement>;
   highlightTerm?: string;
   onEnterReadMode: (content: string) => void;
+  onHeightChange: (messageId: string, height: number) => void;
 }
 
 const CodeBlock: React.FC<React.PropsWithChildren<{ inline?: boolean; className?: string }>> = ({
@@ -170,10 +172,9 @@ const MessageBody = memo(({ message, displayContent, extractedThoughts, highligh
     displayContent: string;
     extractedThoughts: string | null;
     highlightTerm?: string;
-    onEnterReadMode: (content: string) => void;
 }) => {
-    const { handleReUploadAttachment } = useChatActions();
-    const { currentChatSession } = useChatState();
+    const { handleReUploadAttachment } = useMessageContext();
+    const { currentChatSession } = useSessionState();
     const [isThoughtsExpanded, setIsThoughtsExpanded] = useState(false);
     const [isContentExpanded, setIsContentExpanded] = useState(false);
     const markdownContentRef = useRef<HTMLDivElement>(null);
@@ -293,9 +294,9 @@ const MessageActions = memo(({ message, isUser, canRegenerateFollowingAI, isAnyA
     displayContent: string;
     onEnterReadMode: (content: string) => void;
 }) => {
-    const { currentChatSession } = useChatState();
-    const { isLoading } = useChatInteractionStatus();
-    const { handleActualCopyMessage, handleDeleteSingleMessageOnly, handleRegenerateAIMessage, handleRegenerateResponseForUserMessage, handleInsertEmptyMessageAfter } = useChatActions();
+    const { currentChatSession } = useSessionState();
+    const { isLoading } = useInteractionStatus();
+    const { handleActualCopyMessage, handleDeleteSingleMessageOnly, handleRegenerateAIMessage, handleRegenerateResponseForUserMessage, handleInsertEmptyMessageAfter } = useMessageContext();
     const ui = useUIContext();
     const audio = useAudioContext();
 
@@ -437,11 +438,11 @@ const MessageFooter = memo(({ message, generationTime, audioError, displayConten
 const MessageItemComponent: React.FC<MessageItemProps> = ({ 
   message, 
   canRegenerateFollowingAI,
-  chatScrollContainerRef,
   highlightTerm,
   onEnterReadMode,
+  onHeightChange,
 }) => {
-  const { messageGenerationTimes } = useChatState();
+  const { messageGenerationTimes } = useSessionState();
   const audio = useAudioContext();
   const ui = useUIContext();
 
@@ -450,7 +451,18 @@ const MessageItemComponent: React.FC<MessageItemProps> = ({
   const isModel = message.role === ChatMessageRole.MODEL;
 
   const rootDivRef = useRef<HTMLDivElement>(null);
-  const [hasBeenVisible, setHasBeenVisible] = useState(false);
+  
+  useLayoutEffect(() => {
+    const element = rootDivRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => {
+        if (rootDivRef.current) {
+            onHeightChange(message.id, rootDivRef.current.offsetHeight);
+        }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [message.id, onHeightChange]);
 
   const isSelected = ui.isSelectionModeActive && ui.selectedMessageIds.has(message.id);
   
@@ -467,19 +479,6 @@ const MessageItemComponent: React.FC<MessageItemProps> = ({
     }
   }
 
-  useEffect(() => {
-    const currentRef = rootDivRef.current;
-    if (!currentRef || hasBeenVisible) return;
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) {
-        setHasBeenVisible(true);
-        observer.unobserve(currentRef); 
-      }
-    }, { root: chatScrollContainerRef?.current || null, rootMargin: '250px 0px', threshold: 0.01 });
-    observer.observe(currentRef);
-    return () => observer.disconnect();
-  }, [chatScrollContainerRef, hasBeenVisible]);
-
   const bubbleClasses = isUser ? 'bg-indigo-500/10 border border-indigo-400/30 shadow-lg shadow-indigo-900/20 self-end text-white' : isError ? 'aurora-surface border-red-500/50 shadow-lg shadow-red-900/30 self-start text-white' : 'self-start text-gray-200';
   const layoutClasses = isUser ? 'justify-end' : 'justify-start';
 
@@ -488,18 +487,6 @@ const MessageItemComponent: React.FC<MessageItemProps> = ({
     audioErrorMessage: audio.audioPlayerState.currentMessageId?.startsWith(message.id) ? audio.audioPlayerState.error : null,
   };
   const isAnyAudioOperationActiveForMessage = message.isStreaming || audio.isMainButtonMultiFetchingApi(message.id) || (isCurrentAudioPlayerTarget && (audio.audioPlayerState.isLoading || audio.audioPlayerState.isPlaying));
-
-  if (!hasBeenVisible) {
-      return (
-          <div ref={rootDivRef} id={`message-item-${message.id}`} className={`flex items-start mb-1 w-full relative ${layoutClasses}`}>
-              <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-xl lg:max-w-2xl xl:max-w-3xl w-full`}>
-                  <div className="px-4 py-3 rounded-lg opacity-40 animate-pulse w-3/4 sm:w-1/2 bg-white/5" style={{ minHeight: '50px' }}>
-                      <div className="h-3 bg-white/10 rounded w-3/4 mb-2"></div><div className="h-2 bg-white/10 rounded w-1/2"></div>
-                  </div>
-              </div>
-          </div>
-      );
-  }
 
   return (
     <div ref={rootDivRef} id={`message-item-${message.id}`} className={`group flex items-start mb-1 w-full relative transition-colors duration-200 ${isSelected ? 'bg-blue-900/40 rounded-md' : ''} ${ui.isSelectionModeActive ? 'cursor-pointer' : ''} ${layoutClasses}`} onClick={() => ui.isSelectionModeActive && ui.toggleMessageSelection(message.id)} role="listitem">
@@ -512,7 +499,7 @@ const MessageItemComponent: React.FC<MessageItemProps> = ({
         )}
         {(isUser || isModel || isError) && (
             <div className={`px-4 py-3 rounded-lg ${bubbleClasses} relative w-full mt-1`}>
-                <MessageBody message={message} displayContent={displayContent} extractedThoughts={extractedThoughts} highlightTerm={highlightTerm} onEnterReadMode={onEnterReadMode} />
+                <MessageBody message={message} displayContent={displayContent} extractedThoughts={extractedThoughts} highlightTerm={highlightTerm} />
                 <MessageFooter message={message} generationTime={messageGenerationTimes[message.id]} audioError={audioErrorMessage} displayContent={displayContent} />
                 <MessageActions message={message} isUser={isUser} canRegenerateFollowingAI={canRegenerateFollowingAI} isAnyAudioOperationActiveForMessage={!!isAnyAudioOperationActiveForMessage} displayContent={displayContent} onEnterReadMode={onEnterReadMode} />
             </div>

@@ -1,14 +1,14 @@
 
 
 import React, { useState, useEffect, memo, useCallback } from 'react';
-import { useChatActions } from '../contexts/ChatContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
 import { useUIContext } from '../contexts/UIContext.tsx';
 import { CloseIcon } from './Icons.tsx';
 import useAutoResizeTextarea from '../hooks/useAutoResizeTextarea.ts';
 
 // No props are needed anymore!
 const CharacterContextualInfoModal: React.FC = memo(() => {
-  const { handleSaveCharacterContextualInfo } = useChatActions();
+  const { handleSaveCharacterContextualInfo } = useMessageContext();
   const { isContextualInfoModalOpen, editingCharacterForContextualInfo, closeCharacterContextualInfoModal } = useUIContext();
   
   const [infoText, setInfoText] = useState('');

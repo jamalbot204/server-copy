@@ -1,7 +1,8 @@
 
 
 import React, { useRef, useCallback, useState, memo } from 'react';
-import { useChatState, useChatActions } from '../contexts/ChatContext.tsx';
+import { useSessionState } from '../contexts/SessionContext.tsx';
+import { useMessageContext } from '../contexts/MessageContext.tsx';
 import { useUIContext } from '../contexts/UIContext.tsx';
 import { useAudioContext } from '../contexts/AudioContext.tsx';
 import { useApiKeyContext } from '../contexts/ApiKeyContext.tsx'; // Import ApiKey context
@@ -26,8 +27,8 @@ import ApiKeyManagerModal from './ApiKeyManagerModal.tsx';
 
 
 const AppContent: React.FC = memo(() => {
-  const { isLoadingData, currentChatSession } = useChatState();
-  const { handleDeleteMessageAndSubsequent, performActualAudioCacheReset } = useChatActions();
+  const { isLoadingData, currentChatSession } = useSessionState();
+  const { handleDeleteMessageAndSubsequent, performActualAudioCacheReset } = useMessageContext();
   const ui = useUIContext();
   const audio = useAudioContext();
   const { deleteApiKey } = useApiKeyContext(); // Get deleteApiKey function
